@@ -2,6 +2,7 @@ import { PlayerInfoProt } from '@2004scape/rsbuf';
 
 import WordEnc from '#/cache/wordenc/WordEnc.js';
 import Player from '#/engine/entity/Player.js';
+import { sendWorldChat, WORLD_CHAT_SLASH_TRIGGER } from '#/engine/WorldChat.js';
 import Packet from '#/io/Packet.js';
 import ClientGameMessageHandler from '#/network/game/client/ClientGameMessageHandler.js';
 import MessagePublic from '#/network/game/client/model/MessagePublic.js';
@@ -25,6 +26,14 @@ export default class MessagePublicHandler extends ClientGameMessageHandler<Messa
         buf.pos = 0;
         const unpack: string = WordPack.unpack(buf, input.length);
         buf.release();
+
+        // world chat (rng city custom): '/' is not in the wordpack charset so
+        // the client encodes '//' as two leading spaces - see WorldChat.ts
+        if (WORLD_CHAT_SLASH_TRIGGER && unpack.startsWith('  ')) {
+            player.socialProtect = true;
+            sendWorldChat(player, unpack.substring(2));
+            return true;
+        }
 
         player.chatColour = colour;
         player.chatEffect = effect;

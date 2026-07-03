@@ -26,6 +26,7 @@ import Player, { getExpByLevel } from '#/engine/entity/Player.js';
 import { PlayerStat, PlayerStatEnabled, PlayerStatMap } from '#/engine/entity/PlayerStat.js';
 import ScriptProvider from '#/engine/script/ScriptProvider.js';
 import ScriptRunner from '#/engine/script/ScriptRunner.js';
+import { sendWorldChat } from '#/engine/WorldChat.js';
 
 import ClientGameMessageHandler from '#/network/game/client/ClientGameMessageHandler.js';
 import ClientCheat from '#/network/game/client/model/ClientCheat.js';
@@ -52,6 +53,12 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
 
         if (player.staffModLevel >= 2) {
             player.addSessionLog(LoggerEventType.MODERATOR, 'Ran cheat', cheat);
+        }
+
+        // world chat (rng city custom) - available to all players
+        if (cmd === 'w' || cmd === 'world') {
+            sendWorldChat(player, cheat.substring(cmd.length + 1));
+            return true;
         }
 
         if (!Environment.NODE_PRODUCTION && player.staffModLevel >= 4) {

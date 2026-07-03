@@ -393,6 +393,7 @@ export default class Player extends PathingEntity {
 
     socialProtect: boolean = false; // social packet spam protection
     reportAbuseProtect: boolean = false; // social packet spam protection
+    worldChatTick: number = -99; // rng city: tick of last world chat message (cooldown, not persisted)
 
     lastLoginTime: bigint = 0n;
 
