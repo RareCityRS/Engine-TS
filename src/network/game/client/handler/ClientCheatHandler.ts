@@ -61,6 +61,18 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
             return true;
         }
 
+        if (cmd === 'woff') {
+            player.worldChatOff = true;
+            player.messageGame('World chat has been toggled off.');
+            return true;
+        }
+
+        if (cmd === 'won') {
+            player.worldChatOff = false;
+            player.messageGame('World chat has been toggled on.');
+            return true;
+        }
+
         if (!Environment.NODE_PRODUCTION && player.staffModLevel >= 4) {
             // developer commands
 

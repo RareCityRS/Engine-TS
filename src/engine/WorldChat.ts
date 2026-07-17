@@ -67,7 +67,11 @@ export function sendWorldChat(player: Player, input: string): void {
         }
     }
 
-    World.broadcastMes(formatted);
+    for (const target of World.players) {
+        if (target && !target.worldChatOff) {
+            target.wrappedMessageGame(formatted);
+        }
+    }
 
     // piggyback on the public chat logging pipeline: the world tick loop logs
     // player.logMessage to the public_chat table after packet processing.
