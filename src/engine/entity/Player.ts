@@ -391,7 +391,9 @@ export default class Player extends PathingEntity {
 
     socialProtect: boolean = false; // social packet spam protection
     reportAbuseProtect: boolean = false; // social packet spam protection
-
+    worldChatTick: number = -99; // RNG City world chat: tick of last message
+    worldChatOff: boolean = false; // RNG City world chat: toggle on/off
+    
     lastLoginTime: bigint = 0n;
 
     // info updates
@@ -2301,7 +2303,4 @@ export default class Player extends PathingEntity {
 
         return super.isValid();
     }
-
-
-    worldChatOff: boolean = false; // rng city: per-player world chat mute toggle (not persisted)
 }

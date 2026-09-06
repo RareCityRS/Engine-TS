@@ -3,7 +3,7 @@ import World from '#/engine/World.js';
 
 import type Player from '#/engine/entity/Player.js';
 
-// --- World chat (RNG City custom) --------------------------------------------
+// RNG City world chat: broadcast a message with `::w <message>`, `::world <message>` or `//`
 export const WORLD_CHAT_ENABLED: boolean = true;
 export const WORLD_CHAT_SLASH_TRIGGER: boolean = true;
 
@@ -13,9 +13,7 @@ const WORLD_CHAT_COOLDOWN_TICKS: number = 10;
 // keep the player-typed portion within the same bounds as normal chat input.
 const WORLD_CHAT_MAX_LENGTH: number = 80;
 
-// the client special-cases game messages ending with these suffixes (it turns
-// them into trade/duel request lines), so a crafted world message must never
-// end with one of them.
+// crafted world message must never end with these suffixes
 const MAGIC_SUFFIXES: string[] = [':tradereq:', ':duelreq:'];
 
 export function sendWorldChat(player: Player, input: string): void {
@@ -55,8 +53,6 @@ export function sendWorldChat(player: Player, input: string): void {
             target.wrappedMessageGame(formatted);
         }
     }
-
-    // piggyback on the public chat logging pipeline: the world tick loop logs
-    // player.logMessage to the public_chat table after packet processing.
+    
     player.logMessage = `[World] ${message}`;
 }

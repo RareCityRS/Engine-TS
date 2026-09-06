@@ -26,6 +26,7 @@ import Player, { getExpByLevel } from '#/engine/entity/Player.js';
 import { PlayerStat, PlayerStatEnabled, PlayerStatMap } from '#/engine/entity/PlayerStat.js';
 import ScriptProvider from '#/engine/script/ScriptProvider.js';
 import ScriptRunner from '#/engine/script/ScriptRunner.js';
+import { sendWorldChat } from '#/engine/WorldChat.js';
 
 import ClientGameMessageHandler from '#/network/game/client/ClientGameMessageHandler.js';
 import ClientCheat from '#/network/game/client/model/ClientCheat.js';
@@ -52,6 +53,22 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
 
         if (player.staffModLevel >= 2) {
             player.addSessionLog(LoggerEventType.MODERATOR, 'Ran cheat', cheat);
+        }
+
+        // RNG City world chat
+        if (cmd === 'w' || cmd === 'world') {
+            sendWorldChat(player, cheat.substring(cmd.length + 1));
+            return true;
+        }
+        if (cmd === 'woff') {
+            player.worldChatOff = true;
+            player.messageGame('World chat toggled off.');
+            return true;
+        }
+        if (cmd === 'won') {
+            player.worldChatOff = false;
+            player.messageGame('World chat toggled on.');
+            return true;
         }
 
         if (!Environment.node.production && player.staffModLevel >= 4) {
