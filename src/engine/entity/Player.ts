@@ -2301,4 +2301,7 @@ export default class Player extends PathingEntity {
 
         return super.isValid();
     }
+
+
+    worldChatOff: boolean = false; // rng city: per-player world chat mute toggle (not persisted)
 }
