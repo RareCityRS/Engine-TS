@@ -4,7 +4,6 @@ import { NetworkPlayer } from '#/engine/entity/NetworkPlayer.js';
 import Isaac from '#/io/Isaac.js';
 import Packet from '#/io/Packet.js';
 
-
 export default abstract class ClientSocket {
     uuid = randomUUID();
     remoteAddress = 'unknown';
@@ -17,7 +16,7 @@ export default abstract class ClientSocket {
     decryptor: Isaac | null = null;
 
     in = Packet.alloc(65535); // node won't let us read from the socket as a stream so we buffer it ourselves
-    out = Packet.alloc(1);
+    out = Packet.alloc(2);
 
     opcode = -1; // current opcode being read
     waiting = 0; // bytes to wait for (if any)
