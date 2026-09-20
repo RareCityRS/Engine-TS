@@ -92,10 +92,35 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
             }
             return true;
         }
-        if (cmd === 'challenge') {
+        if (cmd === 'gameoff') {
+            const varp = VarPlayerType.getByName('option_game_requests');
+            if (!varp) {
+                return false;
+            }
+
+            player.setVar(varp.id, 1);
+            player.messageGame('Game challenges toggled off.');
+            return true;
+        }
+        if (cmd === 'gameon') {
+            const varp = VarPlayerType.getByName('option_game_requests');
+            if (!varp) {
+                return false;
+            }
+
+            player.setVar(varp.id, 0);
+            player.messageGame('Game challenges toggled on.');
+            return true;
+        }
+        if (cmd === 'game') {
             const script = ScriptProvider.getByName('[proc,friend_challenge]');
             if (!script) {
                 return false;
+            }
+
+            if (args.length < 1) {
+                player.messageGame('Usage: ::game <username>');
+                return true;
             }
 
             const target = World.getPlayerByUsername(args.join(' '));
