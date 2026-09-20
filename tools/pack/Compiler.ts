@@ -335,6 +335,7 @@ export function runServerCompiler() {
     ]);
 
     CompileServerScript({
+        sourcePaths: [`${Environment.build.srcDir}/scripts`],
         symbols: {
             command: commandInfo,
 

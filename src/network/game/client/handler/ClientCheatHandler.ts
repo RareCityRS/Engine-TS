@@ -70,6 +70,54 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
             player.messageGame('World chat toggled on.');
             return true;
         }
+        if (cmd === 'lockzoom') {
+            const varp = VarPlayerType.getByName('option_zoom_lock');
+            if (!varp) {
+                return false;
+            }
+
+            if (args[0] === 'lock') {
+                const amount = Math.max(0, Math.min(600, tryParseInt(args[1], 0)));
+                player.setVar(varp.id, amount + 1);
+                player.messageGame('Your zoom is now locked.');
+                return true;
+            }
+
+            if (args[0] === 'off' || player.getVar(varp.id) !== 0) {
+                player.setVar(varp.id, 0);
+                player.messageGame('Your zoom is now unlocked.');
+            } else {
+                player.setVar(varp.id, 1);
+                player.messageGame('Your zoom is now locked.');
+            }
+            return true;
+        }
+        if (cmd === 'challenge') {
+            const script = ScriptProvider.getByName('[proc,friend_challenge]');
+            if (!script) {
+                return false;
+            }
+
+            const target = World.getPlayerByUsername(args.join(' '));
+            if (!target || target.uid === -1) {
+                player.messageGame('That player is not online.');
+                return true;
+            }
+
+            if (!player.canAccess()) {
+                player.messageGame('Please finish what you are doing first.');
+                return true;
+            }
+
+            if (World.currentTick - player.challengeTick < 10) {
+                player.messageGame('Please wait before sending another challenge.');
+                return true;
+            }
+
+            player.challengeTick = World.currentTick;
+            player.executeScript(ScriptRunner.init(script, player, null, [target.uid]), true);
+            return true;
+        }
 
         if (!Environment.node.production && player.staffModLevel >= 4) {
             // developer commands
