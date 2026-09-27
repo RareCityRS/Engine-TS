@@ -8,6 +8,7 @@ import CameraInfo from '#/engine/entity/CameraInfo.js';
 import { PlayerTimerType } from '#/engine/entity/EntityTimer.js';
 import type { HuntVis } from '#/engine/entity/hunt/HuntVis.js';
 import { Interaction } from '#/engine/entity/Interaction.js';
+import { ModalState } from '#/engine/entity/ModalState.js';
 import Player from '#/engine/entity/Player.js';
 import { PlayerQueueType, ScriptArgument } from '#/engine/entity/PlayerQueueRequest.js';
 import { PlayerStat } from '#/engine/entity/PlayerStat.js';
@@ -393,6 +394,9 @@ const PlayerOps: CommandHandlers = {
         if (!locType.op || !locType.op[type]) {
             return;
         }
+        if (state.activePlayer.continueRatGathering(state.activeLoc, ServerTriggerType.APLOC1 + type)) {
+            return;
+        }
         state.activePlayer.stopAction();
         if (!state.activePlayer.inOperableDistance(state.activeLoc)) {
             state.activePlayer.queueWaypoint(state.activeLoc.x, state.activeLoc.z);
@@ -408,6 +412,9 @@ const PlayerOps: CommandHandlers = {
         }
         const npcType: NpcType = NpcType.get(state.activeNpc.type);
         if (!npcType.op || !npcType.op[type]) {
+            return;
+        }
+        if (state.activePlayer.continueRatGathering(state.activeNpc, ServerTriggerType.APNPC1 + type)) {
             return;
         }
         state.activePlayer.stopAction();
@@ -482,8 +489,10 @@ const PlayerOps: CommandHandlers = {
         if (player.lowMemory) {
             return;
         }
-
-        player.write(new SynthSound(synth, loops, delay));
+        const sound = new SynthSound(synth, loops, delay);
+        if (!player.captureRatGatheringSound(sound, state.script)) {
+            player.write(sound);
+        }
     },
 
     [ScriptOpcode.STAFFMODLEVEL]: state => {
@@ -954,6 +963,17 @@ const PlayerOps: CommandHandlers = {
     // https://x.com/JagexAsh/status/1791053667228856563
     [ScriptOpcode.BUSY2]: state => {
         state.pushInt(state.activePlayer.hasInteraction() || state.activePlayer.hasWaypoints() ? 1 : 0);
+    },
+
+    [ScriptOpcode.HASWEAKQUEUE]: state => {
+        state.pushInt(state.activePlayer.hasWeakQueue() ? 1 : 0);
+    },
+
+    [ScriptOpcode.P_RATCLEARLEVELUP]: state => {
+        const player = state.activePlayer;
+        if (player.activeScript?.trigger === ServerTriggerType.ADVANCESTAT && player.activeScript.execution === ScriptState.PAUSEBUTTON && player.modalState === ModalState.CHAT && !player.delayed && !player.loggingOut && !player.hasWeakQueue()) {
+            player.closeModal(false);
+        }
     },
 
     // https://x.com/JagexAsh/status/1821831590906859683

@@ -53,6 +53,13 @@ const ScriptOpcodePointers: {
         require: ['active_player'],
         require2: ['active_player2']
     },
+    [ScriptOpcode.HASWEAKQUEUE]: {
+        require: ['active_player'],
+        require2: ['active_player2']
+    },
+    [ScriptOpcode.P_RATCLEARLEVELUP]: {
+        require: ['active_player', 'active_npc']
+    },
     [ScriptOpcode.CAM_LOOKAT]: {
         require: ['active_player'],
         require2: ['active_player2']

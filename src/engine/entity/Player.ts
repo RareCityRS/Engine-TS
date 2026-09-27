@@ -12,6 +12,9 @@ import ParamType from '#/cache/config/ParamType.js';
 import ScriptVarType from '#/cache/config/ScriptVarType.js';
 import SeqType from '#/cache/config/SeqType.js';
 import VarPlayerType from '#/cache/config/VarPlayerType.js';
+import { Interaction } from '#/engine/entity/Interaction.js';
+import { NpcMode } from '#/engine/entity/NpcMode.js';
+import { NpcStat } from '#/engine/entity/NpcStat.js';
 import { CoordGrid } from '#/engine/CoordGrid.js';
 import { BlockWalk } from '#/engine/entity/BlockWalk.js';
 import BuildArea from '#/engine/entity/BuildArea.js';
@@ -72,6 +75,31 @@ import VarBitType from '#/cache/config/VarBitType.js';
 import FriendlistLoaded from '#/network/game/server/model/FriendlistLoaded.js';
 import UpdateIgnoreList from '#/network/game/server/model/UpdateIgnoreList.js';
 import Midi from '#/cache/midi/Midi.js';
+
+type RatGathering = {
+    resource: Loc | Npc;
+    type: number;
+    resourceCoord: number;
+    standing: number;
+    op: ServerTriggerType | -1;
+    resumeOp: ServerTriggerType;
+    clockVar: number;
+    delay: number;
+    tick: number;
+    rat: Npc;
+    sourceFilePath: string;
+    animation: [number, number] | null;
+    sounds: ServerGameMessage[];
+};
+
+const ratGatheringScripts = new Map<string, ServerTriggerType>([
+    ['[oploc1,blankrunestone]', ServerTriggerType.APLOC3],
+    ['[oploc3,blankrunestone]', ServerTriggerType.APLOC3],
+    ['[opnpc1,_memberfish]', ServerTriggerType.APNPC4],
+    ['[opnpc4,_memberfish]', ServerTriggerType.APNPC4],
+    ['[opnpc1,_category_632]', ServerTriggerType.APNPC4],
+    ['[opnpc4,_category_632]', ServerTriggerType.APNPC4]
+]);
 
 const levelExperience = new Int32Array(99);
 
@@ -361,6 +389,10 @@ export default class Player extends PathingEntity {
     refreshModal = false;
     refreshModalClose = false;
     requestModalClose = false;
+    private ratGathering: RatGathering | null = null;
+    private ratGatheringStep: RatGathering | null = null;
+    private ratCombatStep = false;
+    private ratGatheringFailure: Entity | null = null;
 
     protect: boolean = false; // whether protected access is available
     activeScript: ScriptState | null = null;
@@ -762,6 +794,10 @@ export default class Player extends PathingEntity {
 
     closeModal(clearWeakQueue: boolean = true) {
         if (clearWeakQueue) {
+            if (!this.ratCombatStep) {
+                this.ratGathering = null;
+                this.finishRatGatheringStep(true);
+            }
             this.weakQueue.clear();
         }
         if (!this.delayed) {
@@ -971,6 +1007,9 @@ export default class Player extends PathingEntity {
 
     // clear current interaction but leave walk queue intact
     clearPendingAction() {
+        if (this.target) {
+            this.ratGatheringFailure = null;
+        }
         this.clearInteraction();
         this.closeModal();
     }
@@ -1247,7 +1286,273 @@ export default class Player extends PathingEntity {
         return this.target.isValid(this.hash64);
     }
 
+    private getRatGatheringScript(resource: Entity | null, op: number): ScriptFile | null {
+        if (!(resource instanceof Loc || resource instanceof Npc)) {
+            return null;
+        }
+        const type = resource instanceof Loc ? LocType.get(resource.type) : NpcType.get(resource.type);
+        const script = ScriptProvider.getByTrigger(op + 7, type.id, type.category);
+        return script && ratGatheringScripts.has(script.name) ? script : null;
+    }
+
+    private ratGatheringAllowed(): boolean {
+        return (
+            this.levels[PlayerStat.HITPOINTS] > 0 &&
+            !this.loggingOut &&
+            !this.hasWeakQueue() &&
+            this.getVar(VarPlayerType.getId('option_nodef')) === 0 &&
+            (this.getVar(VarPlayerType.getId('gather_block_until')) as number) < World.currentTick &&
+            (this.getVar(VarPlayerType.getId('lastcombat_pvp')) as number) + 8 < World.currentTick
+        );
+    }
+
+    private ratAttacking(rat: Npc): boolean {
+        return (
+            World.getNpc(rat.nid) === rat &&
+            rat.isValid() &&
+            rat.levels[NpcStat.HITPOINTS] > 0 &&
+            rat.target === this &&
+            rat.targetOp === NpcMode.OPPLAYER2 &&
+            ['rat', 'catcity_rat', 'catcity_rat_desert', 'catcity_rat_temp'].includes(NpcType.get(rat.type).debugname ?? '') &&
+            (this.getVar(VarPlayerType.getId('lastcombat')) as number) + 8 >= World.currentTick
+        );
+    }
+
+    private ratResourceInRange(resource: Loc | Npc): boolean {
+        return resource.level === this.level && this.inOperableDistance(resource);
+    }
+
+    private validRatResource(gathering: RatGathering): boolean {
+        const { resource } = gathering;
+        return this.coord === gathering.standing && resource.isValid(this.hash64) && resource.type === gathering.type && CoordGrid.packCoord(resource.level, resource.x, resource.z) === gathering.resourceCoord;
+    }
+
+    override setFaceEntity(): void {
+        if (this.ratGathering && this.target === this.ratGathering.rat) {
+            if (this.faceEntity !== -1) {
+                this.faceEntity = -1;
+                this.masks |= this.entitymask;
+            }
+            return;
+        }
+        super.setFaceEntity();
+    }
+
+    override reorientEntity(): void {
+        if (this.ratGathering && this.target === this.ratGathering.rat) {
+            return;
+        }
+        super.reorientEntity();
+    }
+
+    private beginRatGathering() {
+        if (this.target === this.ratGatheringFailure) {
+            return;
+        }
+        this.ratGatheringFailure = null;
+        const script = this.getRatGatheringScript(this.target, this.targetOp);
+        if (!script || !this.canAccess() || this.activeScript || !this.ratGatheringAllowed() || !this.validateTarget()) {
+            return;
+        }
+        const resource = this.target as Loc | Npc;
+        if (!this.ratResourceInRange(resource)) {
+            return;
+        }
+        const rat = World.getNpcByUid(this.getVar(VarPlayerType.getId('aggressive_npc')) as number);
+        const retaliate = ScriptProvider.getByName('[proc,player_retaliate_npc]');
+        const clockVar = VarPlayerType.getId('action_delay');
+        if (!rat || !this.ratAttacking(rat) || !retaliate || clockVar === -1) {
+            return;
+        }
+        const resumeOp = ratGatheringScripts.get(script.name);
+        if (resumeOp === undefined) {
+            return;
+        }
+        const initial = this.targetOp !== resumeOp;
+        this.ratGathering = {
+            resource,
+            type: resource.type,
+            resourceCoord: CoordGrid.packCoord(resource.level, resource.x, resource.z),
+            standing: this.coord,
+            op: this.targetOp as ServerTriggerType,
+            resumeOp,
+            clockVar,
+            delay: initial ? World.currentTick - 1 : (this.getVar(clockVar) as number),
+            tick: World.currentTick - 1,
+            rat,
+            sourceFilePath: script.info.sourceFilePath,
+            animation: null,
+            sounds: []
+        };
+        this.ratCombatStep = true;
+        try {
+            this.clearWaypoints();
+            this.playAnimation(-1, 0);
+            this.executeScript(ScriptRunner.init(retaliate, this, rat), true);
+        } finally {
+            this.ratCombatStep = false;
+        }
+        this.setFaceEntity();
+        this.reorientEntity();
+    }
+
+    captureRatGatheringSound(sound: ServerGameMessage, script: ScriptFile): boolean {
+        if (!this.ratGatheringStep || script.info.sourceFilePath !== this.ratGatheringStep.sourceFilePath) {
+            return false;
+        }
+        this.ratGatheringStep.sounds.push(sound);
+        return true;
+    }
+
+    private finishRatGatheringStep(replay: boolean) {
+        const gathering = this.ratGatheringStep;
+        this.ratGatheringStep = null;
+        if (gathering && replay) {
+            if (gathering.animation) {
+                this.playAnimation(...gathering.animation);
+            }
+            for (const sound of gathering.sounds) {
+                this.write(sound);
+            }
+        }
+    }
+
+    hasWeakQueue(): boolean {
+        const cursor = this.weakQueue.cursor;
+        const pending = this.weakQueue.head() !== null;
+        this.weakQueue.cursor = cursor;
+        return pending;
+    }
+
+    continueRatGathering(resource: Loc | Npc, op: ServerTriggerType): boolean {
+        const gathering = this.ratGatheringStep;
+        if (!gathering) {
+            return false;
+        }
+        if (resource === gathering.resource && this.getRatGatheringScript(resource, op)) {
+            gathering.op = op;
+            return true;
+        }
+        this.ratGathering = null;
+        this.finishRatGatheringStep(true);
+        return false;
+    }
+
+    private processRatGathering(gathering: RatGathering) {
+        const script = this.getRatGatheringScript(gathering.resource, gathering.op);
+        if (!this.validRatResource(gathering) || !this.ratGatheringAllowed() || this.hasWaypoints() || !script || !this.ratResourceInRange(gathering.resource)) {
+            this.ratGathering = null;
+            if (this.target === gathering.resource) {
+                this.clearInteraction();
+                this.setFaceEntity();
+            }
+            return false;
+        }
+        if (this.target !== null && this.target !== gathering.resource && (this.target !== gathering.rat || (this.targetOp !== ServerTriggerType.APNPC2 && this.targetOp !== ServerTriggerType.APNPCT))) {
+            this.ratGathering = null;
+            return false;
+        }
+        const returning = !this.ratAttacking(gathering.rat) || this.target !== gathering.rat;
+        if (returning) {
+            if (this.target === null && this.ratAttacking(gathering.rat)) {
+                this.ratGatheringFailure = gathering.resource;
+            }
+            if (gathering.op === gathering.resumeOp) {
+                this.ratGathering = null;
+                this.setVar(gathering.clockVar, Math.max(this.getVar(gathering.clockVar) as number, gathering.delay));
+                this.setInteraction(Interaction.SCRIPT, gathering.resource, gathering.op);
+                this.setFaceEntity();
+                this.reorientEntity();
+                return false;
+            }
+            this.clearInteraction();
+            this.setFaceEntity();
+        }
+        const state = ScriptRunner.init(script, this, gathering.resource);
+        gathering.delay += Math.max(0, World.currentTick - gathering.tick - 1);
+        gathering.tick = World.currentTick;
+        gathering.op = -1;
+        const pendingAnimation = gathering.animation;
+        gathering.animation = null;
+        gathering.sounds = [];
+        this.ratGatheringStep = gathering;
+        try {
+            this.executeScript(state, true);
+        } finally {
+            this.finishRatGatheringStep(state.execution !== ScriptState.FINISHED || this.busy() || this.hasWaypoints() || this.coord !== gathering.standing || this.target !== gathering.rat || this.ratGathering !== gathering);
+            if (
+                state.execution === ScriptState.SUSPENDED &&
+                this.ratGathering === gathering &&
+                gathering.op !== -1 &&
+                this.target === (returning ? null : gathering.rat) &&
+                !this.hasWaypoints() &&
+                this.coord === gathering.standing &&
+                gathering.resource.isValid(this.hash64)
+            ) {
+                this.setVar(gathering.clockVar, Math.max(this.getVar(gathering.clockVar) as number, gathering.delay));
+                this.setInteraction(Interaction.SCRIPT, gathering.resource, gathering.op);
+                this.targetSubject.type = gathering.type;
+                this.setFaceEntity();
+                this.reorientEntity();
+            }
+            if ((state.execution !== ScriptState.FINISHED || this.busy() || this.hasWaypoints() || this.coord !== gathering.standing) && this.target === gathering.rat) {
+                this.clearInteraction();
+                this.setFaceEntity();
+            }
+            if (state.execution !== ScriptState.FINISHED || gathering.op === -1 || this.busy() || this.target !== (returning ? null : gathering.rat) || !this.validRatResource(gathering)) {
+                this.ratGathering = null;
+            }
+        }
+        if (returning && this.ratGathering === gathering) {
+            this.setInteraction(Interaction.SCRIPT, gathering.resource, gathering.op);
+            this.setFaceEntity();
+            this.reorientEntity();
+        }
+        if (this.ratGathering === gathering && this.target === gathering.rat) {
+            gathering.animation ??= pendingAnimation;
+            if (this.animId === -1) {
+                if (gathering.animation && (this.getVar(gathering.clockVar) as number) <= World.currentTick + 1) {
+                    this.playAnimation(...gathering.animation);
+                    if (this.animId !== -1) {
+                        this.focus(CoordGrid.fine(gathering.resource.x, gathering.resource.width), CoordGrid.fine(gathering.resource.z, gathering.resource.length), true);
+                    }
+                    gathering.animation = null;
+                }
+                for (const sound of gathering.sounds) {
+                    this.write(sound);
+                }
+            }
+        }
+        return true;
+    }
+
     processInteraction() {
+        if (!this.ratGathering) {
+            this.beginRatGathering();
+        }
+        const gathering = this.ratGathering;
+        if (!gathering) {
+            this.processInteractionCore();
+            return;
+        }
+        if ((this.target === gathering.resource || !this.ratAttacking(gathering.rat)) && this.canAccess() && !this.activeScript) {
+            if (!this.processRatGathering(gathering)) {
+                this.processInteractionCore();
+            }
+            return;
+        }
+        this.ratCombatStep = this.target === gathering.rat;
+        try {
+            this.processInteractionCore();
+        } finally {
+            this.ratCombatStep = false;
+        }
+        if (this.ratGathering === gathering && this.canAccess() && !this.activeScript) {
+            this.processRatGathering(gathering);
+        }
+    }
+
+    private processInteractionCore() {
         this.followX = this.lastStepX;
         this.followZ = this.lastStepZ;
         this.nextTarget = null;
@@ -1757,6 +2062,9 @@ export default class Player extends PathingEntity {
     // ----
 
     getVar(id: number) {
+        if (this.ratGatheringStep?.clockVar === id) {
+            return this.ratGatheringStep.delay;
+        }
         const varp = VarPlayerType.get(id);
         if (!varp) {
             return 0;
@@ -1766,6 +2074,10 @@ export default class Player extends PathingEntity {
     }
 
     setVar(id: number, value: number | string) {
+        if (this.ratGatheringStep?.clockVar === id && typeof value === 'number') {
+            this.ratGatheringStep.delay = value;
+            return;
+        }
         const varp = VarPlayerType.get(id);
         if (!varp) {
             return;
@@ -1921,6 +2233,10 @@ export default class Player extends PathingEntity {
     }
 
     playAnimation(anim: number, delay: number) {
+        if (this.ratGatheringStep) {
+            this.ratGatheringStep.animation = [anim, delay];
+            return;
+        }
         if (anim >= SeqType.count || this.animProtect) {
             return;
         }
@@ -1929,6 +2245,10 @@ export default class Player extends PathingEntity {
             this.animId = anim;
             this.animDelay = delay;
             this.masks |= PlayerInfoProt.ANIM;
+            if (anim !== -1 && this.ratCombatStep && this.ratGathering) {
+                const rat = this.ratGathering.rat;
+                this.focus(CoordGrid.fine(rat.x, rat.width), CoordGrid.fine(rat.z, rat.length), true);
+            }
         }
     }
 
