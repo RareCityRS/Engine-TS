@@ -59,7 +59,9 @@ const NpcOps: CommandHandlers = {
 
         const position: CoordGrid = check(coord, CoordValid);
         const npcType: NpcType = check(id, NpcTypeValid);
-        check(duration, DurationValid);
+        if (duration !== -1) {
+            check(duration, DurationValid);
+        }
 
         const npc = new Npc(position.level, position.x, position.z, npcType.size, npcType.size, EntityLifeCycle.DESPAWN, World.getNextNid(), npcType.id, npcType.blockwalk);
         World.addNpc(npc, duration);
